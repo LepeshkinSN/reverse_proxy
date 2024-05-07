@@ -84,6 +84,12 @@ do{
 	}
 } while ($start_tries && ! defined($ctrl_conn));
 
+# Exit if control connection couldn't be established
+if (! defined($ctrl_conn)){
+	print("$$: Maximum retries to establish control connection reached. Exiting.\n");
+  exit 1;
+}
+
 # Enable autoflush
 $ctrl_conn->autoflush(1);
 # Enable keepalives
@@ -273,13 +279,6 @@ sub service_clients {
 				next;
 			}
 
-
-			# Requesting connection from inside
-			print("$$: Requesting reverse connection ($port_in <--- ".$service_book{$proxy_server->sockport}."...\n");
-			$ccpf=1;
-			print $ctrl_conn "$port_in:".$service_book{$proxy_server->sockport}."\n";
-			$ccpf=0;									
-				
 			# Fork before reverse connection established
       $kidpid = fork();
 			if (! defined($kidpid)){
@@ -302,12 +301,18 @@ sub service_clients {
 			# We have no childrens yet
 			%Children=();
 
-			# We do not need listening socket here
-			close($proxy_server);
-      print "$$: [Waiting for reverse connection...]\n";
-
 			# Restore SIGPIPE handler to default
 			$SIG{PIPE}='DEFAULT';
+
+			# Requesting connection from inside
+			print("$$: Requesting reverse connection ($port_in <--- ".$service_book{$proxy_server->sockport}.")...\n");
+			$ccpf=1;
+			print $ctrl_conn "$port_in:".$service_book{$proxy_server->sockport}."\n" or kill('PIPE', $root_pid);
+			$ccpf=0;									
+      print "$$: [Waiting for reverse connection...]\n";
+
+			# We do not need listening socket here
+			close($proxy_server);
 			
 			# Set client connection check mechanism
 			$reverse_timer=0;
@@ -318,7 +323,7 @@ sub service_clients {
 					print("$$: WARNING: Client disconnected while waiting for reverse connection. Closing reverse connection socket (port $port_in) and sending abort control command.\n");
 					close ($socket_in);
 					$ccpf=1;
-					print $ctrl_conn "$port_in:!\n" or kill('ALRM', $root_pid);
+					print $ctrl_conn "$port_in:!\n" or kill('PIPE', $root_pid);
 					$ccpf=0;
 					exit;
 				}
