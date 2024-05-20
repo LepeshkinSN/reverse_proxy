@@ -241,9 +241,6 @@ sub service_clients {
     if($ccpf){
       print("$$: Control connection failed. Closing reverse listening socket on port $port_in, rejecting client $client_info and exiting.\n");
       kill('USR1', $root_pid);
-      close($proxy_server);
-      close ($client_conn);
-      close($socket_in);
       die "$$: Control connection failed\n";
     }
   };
@@ -301,13 +298,13 @@ sub service_clients {
       # We have no childrens yet
       %Children=();
 
-      # Restore SIGPIPE handler to default
-      $SIG{PIPE}='DEFAULT';
-
       # Requesting connection from inside
       print("$$: Requesting reverse connection ($port_in <--- ".$service_book{$proxy_server->sockport}.")...\n");
       $ccpf=1;
-      print $ctrl_conn "$port_in:".$service_book{$proxy_server->sockport}."\n" or kill('PIPE', $root_pid);
+      print $ctrl_conn "$port_in:".$service_book{$proxy_server->sockport}."\n" or sub{
+                                                                                    kill('USR1', $root_pid);
+                                                                                    die "$$: print() to control connection failed\n";
+                                                                                  };
       $ccpf=0;									
       print "$$: [Waiting for reverse connection...]\n";
 
@@ -323,7 +320,10 @@ sub service_clients {
           print("$$: WARNING: Client disconnected while waiting for reverse connection. Closing reverse connection socket (port $port_in) and sending abort control command.\n");
           close ($socket_in);
           $ccpf=1;
-          print $ctrl_conn "$port_in:!\n" or kill('PIPE', $root_pid);
+          print $ctrl_conn "$port_in:!\n" or sub{
+		                                           kill('USR1', $root_pid);
+		                                           die "$$: print() to control connection failed\n";
+		                                         };
           $ccpf=0;
           exit;
         }
@@ -333,6 +333,9 @@ sub service_clients {
       # Block until reverse connection received
       while(! ($reverse_conn=$socket_in->accept())){};
       alarm 0;	#Disable alarm
+
+      # Restore SIGPIPE handler to default
+      $SIG{PIPE}='DEFAULT';
       
       # Enable keepalives
       $reverse_conn->setsockopt(SOL_SOCKET, SO_KEEPALIVE, 1);
